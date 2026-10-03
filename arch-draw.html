@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ArchDraw — Processor Architecture Designer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0a1929; --gridm:#132840; --gridM:#1c3f5e;
+    --panel:#0d2135; --panel2:#0f2a44; --line:#1e3a55;
+    --ink:#d9ecff; --ink-dim:#7fa3c4;
+    --stroke:#cfe8ff; --fill:#0f2438;
+    --wire:#5fd0ff; --bus:#ffb454; --err:#ff6b6b; --accent:#3ba7ff;
+    --mono: 'Consolas','SF Mono','Menlo',monospace;
+    --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);overflow:hidden;}
+  #app{display:flex;flex-direction:column;height:100vh;}
+
+  /* Top bar */
+  #topbar{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0;}
+  #topbar .brand{font-family:var(--mono);font-weight:700;letter-spacing:1px;color:var(--stroke);margin-right:14px;font-size:14px;}
+  #topbar .brand span{color:var(--wire);}
+  .tbtn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:4px;font-size:12.5px;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:6px;}
+  .tbtn:hover{border-color:var(--accent);color:#fff;}
+  .tbtn:active{transform:scale(0.97);}
+  .tbsep{width:1px;align-self:stretch;background:var(--line);margin:0 6px;}
+  #topbar .spacer{flex:1;}
+  #status{font-family:var(--mono);font-size:12px;color:var(--ink-dim);min-width:200px;text-align:right;}
+  #status.err{color:var(--err);}
+
+  /* Body layout */
+  #body{flex:1;display:flex;min-height:0;}
+
+  /* Palette */
+  #palette{width:190px;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;flex-shrink:0;padding:10px 8px;}
+  .pgroup-title{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:1px;margin:14px 4px 6px;}
+  .pgroup-title:first-child{margin-top:2px;}
+  .pitem{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:4px;cursor:pointer;font-size:12.5px;border:1px solid transparent;}
+  .pitem:hover{background:var(--panel2);border-color:var(--line);}
+  .pitem.active{background:#123252;border-color:var(--accent);color:#fff;}
+  .pitem svg{flex-shrink:0;}
+  .pitem .del{margin-left:auto;opacity:0.4;font-size:14px;padding:0 4px;}
+  .pitem .del:hover{opacity:1;color:var(--err);}
+
+  /* Canvas */
+  #canvasWrap{flex:1;overflow:auto;position:relative;background:var(--bg);
+    background-image:
+      linear-gradient(var(--gridm) 1px, transparent 1px),
+      linear-gradient(90deg, var(--gridm) 1px, transparent 1px),
+      linear-gradient(var(--gridM) 1px, transparent 1px),
+      linear-gradient(90deg, var(--gridM) 1px, transparent 1px);
+    background-size:20px 20px,20px 20px,100px 100px,100px 100px;
+  }
+  #svgCanvas{display:block;cursor:default;}
+  #svgCanvas.placing{cursor:crosshair;}
+  .sym-body{fill:var(--fill);stroke:var(--stroke);stroke-width:1.6;}
+  .sym-body.selected{stroke:var(--err);stroke-width:2.2;}
+  .sym-label{fill:var(--stroke);font-family:var(--mono);font-size:12px;text-anchor:middle;dominant-baseline:middle;pointer-events:none;user-select:none;}
+  .pin-label{fill:var(--ink-dim);font-family:var(--mono);font-size:10px;pointer-events:none;user-select:none;}
+  .pin-name-label{pointer-events:auto;cursor:move;}
+  .sym-label-drag{pointer-events:auto;cursor:move;}
+  .pin-dot{fill:var(--bg);stroke:var(--wire);stroke-width:1.6;cursor:crosshair;}
+  .pin-dot.bus{stroke:var(--bus);}
+  .pin-dot:hover{fill:var(--wire);}
+  .wire-path{fill:none;stroke:var(--wire);stroke-width:1.8;cursor:pointer;}
+  .wire-path.bus{stroke:var(--bus);stroke-width:4;}
+  .wire-path.selected{stroke:var(--err);}
+  .wire-hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer;}
+  .bus-label{fill:var(--bus);font-family:var(--mono);font-size:10.5px;text-anchor:middle;pointer-events:none;}
+  .bus-label-drag{pointer-events:auto;cursor:move;}
+  .term-shape{fill:var(--panel2);stroke:var(--stroke);stroke-width:1.6;}
+  .drag-preview{fill:none;stroke:var(--ink-dim);stroke-width:1.5;stroke-dasharray:4 3;pointer-events:none;}
+
+  /* Modal */
+  .modal-veil{position:fixed;inset:0;background:rgba(3,10,18,0.65);display:flex;align-items:center;justify-content:center;z-index:50;}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px;width:420px;max-height:80vh;overflow-y:auto;font-size:13px;}
+  .modal h3{margin:0 0 14px;font-family:var(--mono);font-size:14px;color:var(--stroke);border-bottom:1px solid var(--line);padding-bottom:10px;}
+  .frow{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .frow label{width:78px;flex-shrink:0;color:var(--ink-dim);font-size:12px;}
+  .frow input[type=text],.frow input[type=number],.frow select{flex:1;background:var(--fill);border:1px solid var(--line);color:var(--ink);padding:6px 8px;border-radius:4px;font-size:12.5px;font-family:var(--sans);}
+  .frow input[type=color]{width:36px;height:28px;padding:0;border:1px solid var(--line);border-radius:4px;background:none;}
+  .frow input[type=checkbox]{width:16px;height:16px;}
+  .pinrow{display:flex;align-items:center;gap:5px;margin-bottom:6px;background:var(--fill);padding:6px;border-radius:4px;}
+  .pinrow input[type=text]{width:56px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:4px 5px;border-radius:3px;font-size:11.5px;}
+  .pinrow select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:4px;border-radius:3px;font-size:11px;}
+  .pinrow input[type=text].range{width:52px;}
+  .pinrow .rm{cursor:pointer;color:var(--err);font-size:15px;padding:0 4px;margin-left:auto;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);}
+  .mbtn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:7px 14px;border-radius:4px;font-size:12.5px;cursor:pointer;}
+  .mbtn.primary{background:var(--accent);border-color:var(--accent);color:#04223c;font-weight:600;}
+  .mbtn:hover{filter:brightness(1.15);}
+  .addpin-btn{background:none;border:1px dashed var(--line);color:var(--ink-dim);padding:6px;width:100%;border-radius:4px;cursor:pointer;font-size:12px;margin-top:4px;}
+  .addpin-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+  /* Toast */
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a0e0e;border:1px solid var(--err);color:#ffd6d6;padding:9px 16px;border-radius:5px;font-size:12.5px;font-family:var(--mono);display:none;z-index:60;}
+
+  #fileInput{display:none;}
+  ::-webkit-scrollbar{width:9px;height:9px;}
+  ::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="brand">ARCH<span>DRAW</span></div>
+    <button class="tbtn" id="btnSave">Save file</button>
+    <button class="tbtn" id="btnLoad">Load file</button>
+    <button class="tbtn" id="btnPdf">Export PDF</button>
+    <div class="tbsep"></div>
+    <button class="tbtn" id="btnUndo" title="Undo (Ctrl+Z)">↶ Undo</button>
+    <div class="tbsep"></div>
+    <button class="tbtn" id="btnEdit" title="Edit selected">Edit</button>
+    <button class="tbtn" id="btnRotate" title="Rotate selected 90° (R)">Rotate</button>
+    <button class="tbtn" id="btnDup" title="Duplicate selected (D)">Duplicate</button>
+    <button class="tbtn" id="btnDel" title="Delete selected (Del)">Delete</button>
+    <button class="tbtn" id="btnSaveLib" title="Save selected module to library">Save to library</button>
+    <div class="spacer"></div>
+    <div id="status">Click a palette item to place a shape. Click a pin to start a wire, click to bend it, click a pin to finish.</div>
+  </div>
+  <div id="body">
+    <div id="palette">
+      <div class="pgroup-title">Structure</div>
+      <div class="pitem" data-place="module">M module box</div>
+      <div class="pitem" data-place="terminal">◦ external port</div>
+      <div class="pitem" data-place="text">T text label</div>
+
+      <div class="pgroup-title">Logic</div>
+      <div class="pitem" data-place="mux">⌂ mux</div>
+      <div class="pitem" data-place="and">D and</div>
+      <div class="pitem" data-place="or">) or</div>
+      <div class="pitem" data-place="not">▷ not</div>
+      <div class="pitem" data-place="decoder">◁ decoder</div>
+
+      <div class="pgroup-title">Sequential</div>
+      <div class="pitem" data-place="register">▭ register</div>
+      <div class="pitem" data-place="flipflop">▭ D flip-flop</div>
+
+      <div class="pgroup-title">Arithmetic</div>
+      <div class="pitem" data-place="adder">+ adder</div>
+
+      <div class="pgroup-title" id="libTitle" style="display:none;">My modules</div>
+      <div id="libList"></div>
+    </div>
+    <div id="canvasWrap">
+      <svg id="svgCanvas" width="2400" height="1600">
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="var(--wire)"></path>
+          </marker>
+          <marker id="arrowBus" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="var(--bus)"></path>
+          </marker>
+        </defs>
+        <g id="layerWires"></g>
+        <g id="layerSymbols"></g>
+        <g id="layerPreview"></g>
+      </svg>
+    </div>
+  </div>
+</div>
+<input type="file" id="fileInput" accept=".json,.arch">
+<div id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+const GRID = 20;
+const snap = v => Math.round(v/GRID)*GRID;
+const uid = () => 'x'+Math.random().toString(36).slice(2,9);
+
+function toast(msg, isErr){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display='block';
+  t.style.borderColor = isErr ? 'var(--err)' : 'var(--wire)';
+  t.style.color = isErr ? '#ffd6d6' : '#d6f3ff';
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>{ t.style.display='none'; }, 3200);
+}
+function setStatus(msg, isErr){
+  const s = document.getElementById('status');
+  s.textContent = msg;
+  s.classList.toggle('err', !!isErr);
+}
+
+/* ---------- Built-in component definitions ---------- */
+// pins: {id,name,dir:'in'|'out',side:'left'|'right'|'top'|'bottom',bus,range}
+function mkPins(list){ return list.map(p=>({id:uid(), bus:false, range:'', ...p})); }
+
+function builtinDef(type, bitwidth, opts){
+  bitwidth = bitwidth || 1;
+  opts = opts || {};
+  switch(type){
+    case 'mux':
+      return { shapeType:'mux', label:'MUX', pins: mkPins([
+        {name:'0',dir:'in',side:'left'},{name:'1',dir:'in',side:'left'},
+        {name:'S',dir:'in',side:'bottom'},{name:'Y',dir:'out',side:'right'}
+      ])};
+    case 'and':
+      return { shapeType:'and', label:'', pins: mkPins([
+        {name:'A',dir:'in',side:'left'},{name:'B',dir:'in',side:'left'},{name:'Y',dir:'out',side:'right'}
+      ])};
+    case 'or':
+      return { shapeType:'or', label:'', pins: mkPins([
+        {name:'A',dir:'in',side:'left'},{name:'B',dir:'in',side:'left'},{name:'Y',dir:'out',side:'right'}
+      ])};
+    case 'not':
+      return { shapeType:'not', label:'', pins: mkPins([
+        {name:'A',dir:'in',side:'left'},{name:'Y',dir:'out',side:'right'}
+      ])};
+    case 'register':
+      return { shapeType:'rect', label:'REG', pins: mkPins([
+        {name:'D',dir:'in',side:'left'},{name:'CLK',dir:'in',side:'bottom'},{name:'Q',dir:'out',side:'right'}
+      ])};
+    case 'flipflop':
+      return { shapeType:'rect', label:'DFF', pins: mkPins([
+        {name:'D',dir:'in',side:'left'},{name:'CLK',dir:'in',side:'bottom'},
+        {name:'Q',dir:'out',side:'right'},{name:'QN',dir:'out',side:'right'}
+      ])};
+    case 'adder':
+      return { shapeType:'rect', label:'+', pins: mkPins([
+        {name:'A',dir:'in',side:'left'},{name:'B',dir:'in',side:'left'},{name:'Cin',dir:'in',side:'bottom'},
+        {name:'Sum',dir:'out',side:'right'},{name:'Cout',dir:'out',side:'top'}
+      ])};
+    case 'decoder': {
+      const lines = opts.lines || 2;
+      const outs = [];
+      for(let i=0;i<Math.pow(2,lines);i++) outs.push({name:'D'+i,dir:'out',side:'right'});
+      return { shapeType:'dectrap', label:'DEC', pins: mkPins([
+        {name:'IN',dir:'in',side:'left'},{name:'EN',dir:'in',side:'bottom'}, ...outs
+      ]), lines };
+    }
+  }
+}
+
+/* ---------- State ---------- */
+let state = {
+  symbols: [],
+  wires: [],
+  library: []
+};
+let selected = null;    // {kind:'symbol'|'wire', id}
+let placingType = null;
+let wireDraw = null;    // {fromSymId,fromPinId,points:[{x,y},...]} — active multi-click wire route
+let dragState = null;   // {id,offx,offy}
+let labelDragState = null; // {symId,pinId,startX,startY,origLox,origLoy}
+let symLabelDrag = null;   // {symId,startX,startY,origOx,origOy} — dragging a symbol's own name label (e.g. a port)
+let wireLabelDrag = null;  // {wid,startX,startY,origOx,origOy}
+let panState = null;
+let undoStack = [];
+const MAX_UNDO = 60;
+function snapshotForUndo(){
+  undoStack.push(JSON.stringify({symbols:state.symbols, wires:state.wires}));
+  if(undoStack.length>MAX_UNDO) undoStack.shift();
+}
+function undo(){
+  if(!undoStack.length){ toast('Nothing to undo.', true); return; }
+  const snap = JSON.parse(undoStack.pop());
+  state.symbols = snap.symbols;
+  state.wires = snap.wires;
+  selected = null;
+  render();
+  toast('Undid last action.', false);
+}
+
+const svg = document.getElementById('svgCanvas');
+const layerSymbols = document.getElementById('layerSymbols');
+const layerWires = document.getElementById('layerWires');
+const layerPreview = document.getElementById('layerPreview');
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs){
+  const e = document.createElementNS(NS, tag);
+  if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+/* ---------- Layout ---------- */
+function rotatePoint(px,py,cx,cy,angleDeg){
+  const rad = angleDeg*Math.PI/180;
+  const dx=px-cx, dy=py-cy;
+  return { x: cx + dx*Math.cos(rad) - dy*Math.sin(rad), y: cy + dx*Math.sin(rad) + dy*Math.cos(rad) };
+}
+function counterRotate(node, x, y, rot){
+  if(rot) node.setAttribute('transform', `rotate(${-rot}, ${x}, ${y})`);
+}
+function layoutSymbol(sym){
+  if(sym.type === 'terminal'){
+    // A single grid cell footprint, so its pin lands exactly on a grid line.
+    sym._w = GRID*2; sym._h = GRID*2;
+    if(!sym.pins.length) sym.pins = mkPins([{name:sym.termDir==='out'?'OUT':'IN', dir:sym.termDir||'in', side:'right'}]);
+    sym.pins[0]._x = sym._w; sym.pins[0]._y = sym._h/2;
+    return;
+  }
+  if(sym.type === 'text'){
+    const len = (sym.name||'label').length;
+    sym._w = Math.max(GRID*2, Math.ceil((len*7+10)/GRID)*GRID);
+    sym._h = GRID;
+    sym.pins = [];
+    return;
+  }
+  const bySide = {left:[],right:[],top:[],bottom:[]};
+  sym.pins.forEach(p=>bySide[p.side].push(p));
+  const maxVert = Math.max(bySide.left.length, bySide.right.length, 1);
+  const maxHoriz = Math.max(bySide.top.length, bySide.bottom.length, 1);
+  const cell = GRID*2; // one pin per 2 grid squares — keeps every pin on a grid line
+  const w = Math.max(cell*(maxHoriz+1), sym.type==='not' ? GRID*3 : GRID*5);
+  const h = Math.max(cell*(maxVert+1), GRID*3);
+  sym._w = w; sym._h = h;
+  function place(arr, side, maxCount){
+    const offset = Math.floor((maxCount-arr.length)/2);
+    arr.forEach((p,i)=>{
+      const pos = cell*(offset+i+1);
+      if(side==='left'){ p._x=0; p._y=pos; }
+      if(side==='right'){ p._x=w; p._y=pos; }
+      if(side==='top'){ p._x=pos; p._y=0; }
+      if(side==='bottom'){ p._x=pos; p._y=h; }
+    });
+  }
+  place(bySide.left,'left',maxVert); place(bySide.right,'right',maxVert);
+  place(bySide.top,'top',maxHoriz); place(bySide.bottom,'bottom',maxHoriz);
+}
+
+function shapePath(sym){
+  const w = sym._w, h = sym._h;
+  switch(sym.type){
+    case 'and':
+      return `M0,0 L${w*0.5},0 A${w*0.5},${h*0.5} 0 0 1 ${w*0.5},${h} L0,${h} Z`;
+    case 'or':
+      return `M0,0 Q${w*0.35},${h*0.5} 0,${h} Q${w*0.7},${h} ${w},${h*0.5} Q${w*0.7},0 0,0 Z`;
+    case 'not':
+      return `M0,0 L${w-14},${h/2} L0,${h} Z M${w-14},${h/2} m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0`;
+    case 'mux':
+      return `M0,${h*0.08} L0,${h*0.92} L${w},${h*0.72} L${w},${h*0.28} Z`;
+    case 'dectrap':
+      return `M0,${h*0.28} L0,${h*0.72} L${w},${h*0.92} L${w},${h*0.08} Z`;
+    default:
+      return `M0,0 H${w} V${h} H0 Z`;
+  }
+}
+
+/* ---------- Rendering ---------- */
+function render(){
+  layerSymbols.innerHTML = '';
+  layerWires.innerHTML = '';
+
+  state.symbols.forEach(sym=>{
+    layoutSymbol(sym);
+    const rot = sym.rotation||0;
+    const cx = sym._w/2, cy = sym._h/2;
+    const g = el('g', {transform:`translate(${sym.x},${sym.y}) rotate(${rot}, ${cx}, ${cy})`, 'data-id':sym.id, class:'symbol-g'});
+
+    if(sym.type === 'text'){
+      const isSel = selected&&selected.kind==='symbol'&&selected.id===sym.id;
+      const rect = el('rect',{x:0,y:0,width:sym._w,height:sym._h,fill:'transparent',stroke:isSel?'var(--err)':'transparent','stroke-width':1,'stroke-dasharray':'3 2'});
+      g.appendChild(rect);
+      const lbl = el('text',{x:sym._w/2, y:sym._h/2+4, class:'sym-label'});
+      lbl.setAttribute('text-anchor','middle');
+      lbl.style.fontSize='13px';
+      lbl.textContent = sym.name || 'label';
+      if(sym.color) lbl.style.fill = sym.color;
+      g.appendChild(lbl);
+    } else if(sym.type === 'terminal'){
+      const cx = sym._w/2, cy = sym._h/2, r = 9;
+      const stub = el('line',{x1:cx+r,y1:cy,x2:sym._w,y2:cy,stroke:sym.color||'var(--stroke)','stroke-width':1.6,class:'term-stub'});
+      g.appendChild(stub);
+      const c = el('circle',{cx,cy,r,class:'term-shape'});
+      if(sym.color) c.style.stroke = sym.color;
+      g.appendChild(c);
+      const lbl = el('text',{x:cx+(sym.labelOx||0), y:sym._h+13+(sym.labelOy||0), class:'sym-label sym-label-drag', 'data-id':sym.id});
+      lbl.textContent = sym.name || 'PORT';
+      lbl.style.fill = sym.color || 'var(--stroke)';
+      counterRotate(lbl, cx+(sym.labelOx||0), sym._h+13+(sym.labelOy||0), rot);
+      g.appendChild(lbl);
+    } else {
+      const path = el('path',{d:shapePath(sym), class:'sym-body'+(selected&&selected.kind==='symbol'&&selected.id===sym.id?' selected':'')});
+      if(sym.color){ path.style.stroke = sym.color; }
+      g.appendChild(path);
+      const lblY = sym.type==='not'||sym.type==='and'||sym.type==='or' ? -10 : sym._h/2;
+      const lbl = el('text',{x:sym._w/2, y: lblY, class:'sym-label'});
+      lbl.textContent = sym.name || (BUILTIN_LABELS[sym.type]||sym.type.toUpperCase());
+      if(sym.color) lbl.style.fill = sym.color;
+      counterRotate(lbl, sym._w/2, lblY, rot);
+      g.appendChild(lbl);
+      if(sym.bitwidth && sym.bitwidth>1){
+        const bw = el('text',{x:sym._w/2, y:sym._h+13, class:'pin-label'});
+        bw.textContent = '['+(sym.bitwidth-1)+':0]';
+        counterRotate(bw, sym._w/2, sym._h+13, rot);
+        g.appendChild(bw);
+      }
+    }
+
+    // pins
+    if(sym.type !== 'text'){
+      sym.pins.forEach(p=>{
+        const dot = el('circle',{cx:p._x, cy:p._y, r:4.5, class:'pin-dot'+(p.bus?' bus':''), 'data-symid':sym.id, 'data-pinid':p.id});
+        g.appendChild(dot);
+        if(sym.type !== 'terminal'){
+          let tx=p._x, ty=p._y, anchor='middle';
+          if(p.side==='left'){ tx=p._x+7; ty=p._y-6; anchor='start'; }
+          if(p.side==='right'){ tx=p._x-7; ty=p._y-6; anchor='end'; }
+          if(p.side==='top'){ tx=p._x+6; ty=p._y+11; anchor='start'; }
+          if(p.side==='bottom'){ tx=p._x+6; ty=p._y-5; anchor='start'; }
+          tx += (p.lox||0); ty += (p.loy||0);
+          const lab = el('text',{x:tx,y:ty,class:'pin-label pin-name-label','data-symid':sym.id,'data-pinid':p.id});
+          lab.setAttribute('text-anchor', anchor);
+          lab.textContent = p.name;
+          counterRotate(lab, tx, ty, rot);
+          g.appendChild(lab);
+        }
+      });
+    }
+
+    g.style.cursor = 'move';
+    layerSymbols.appendChild(g);
+  });
+
+  state.wires.forEach(w=>drawWire(w));
+}
+const BUILTIN_LABELS = {register:'REG',flipflop:'DFF',adder:'+',mux:'MUX',decoder:'DEC'};
+
+function pinWorldPos(symId, pinId){
+  const sym = state.symbols.find(s=>s.id===symId);
+  if(!sym) return null;
+  const p = sym.pins.find(pp=>pp.id===pinId);
+  if(!p) return null;
+  let lx=p._x, ly=p._y;
+  const rot = sym.rotation||0;
+  if(rot){ const rp = rotatePoint(lx,ly, sym._w/2, sym._h/2, rot); lx=rp.x; ly=rp.y; }
+  return { x: sym.x + lx, y: sym.y + ly, side: p.side, dir: p.dir, bus: p.bus, range: p.range };
+}
+
+function elbowMidpoints(a, b){
+  const midx = snap((a.x+b.x)/2);
+  return [{x:midx,y:a.y},{x:midx,y:b.y}];
+}
+
+function axisConstrain(prev, mouse){
+  const dx = mouse.x - prev.x, dy = mouse.y - prev.y;
+  if(Math.abs(dx) >= Math.abs(dy)) return { x: snap(mouse.x), y: prev.y };
+  return { x: prev.x, y: snap(mouse.y) };
+}
+
+// Full ordered point list for a wire: start pin -> user-placed bends -> end pin,
+// auto-elbowing the final leg only if the user didn't already land it on-axis.
+function wirePathPoints(w){
+  const a = pinWorldPos(w.from.symId, w.from.pinId);
+  const b = pinWorldPos(w.to.symId, w.to.pinId);
+  if(!a||!b) return null;
+  const pts = [{x:a.x,y:a.y}, ...(w.waypoints||[])];
+  const last = pts[pts.length-1];
+  if(last.x !== b.x && last.y !== b.y){
+    pts.push(...elbowMidpoints(last,b));
+  }
+  pts.push({x:b.x,y:b.y});
+  return pts;
+}
+
+function drawWire(w){
+  const pts = wirePathPoints(w);
+  if(!pts) return;
+  const isBus = w.bus;
+  let d = 'M'+pts[0].x+','+pts[0].y;
+  for(let i=1;i<pts.length;i++) d += ' L'+pts[i].x+','+pts[i].y;
+  const hit = el('path',{d, class:'wire-hit', 'data-wid':w.id});
+  layerWires.appendChild(hit);
+  const p = el('path',{d, class:'wire-path'+(isBus?' bus':'')+(selected&&selected.kind==='wire'&&selected.id===w.id?' selected':''),
+    'marker-end': isBus?'url(#arrowBus)':'url(#arrow)', 'data-wid':w.id});
+  if(w.color) p.style.stroke = w.color;
+  layerWires.appendChild(p);
+  if(isBus){
+    const mid = pts[Math.floor((pts.length-1)/2)];
+    const next = pts[Math.floor((pts.length-1)/2)+1] || mid;
+    const midx=(mid.x+next.x)/2 + (w.labelOx||0), midy=(mid.y+next.y)/2-9 + (w.labelOy||0);
+    const lab = el('text',{x:midx,y:midy,class:'bus-label bus-label-drag','data-wid':w.id});
+    lab.textContent = w.range ? '['+w.range+']' : '';
+    if(w.color) lab.style.fill = w.color;
+    layerWires.appendChild(lab);
+  }
+}
+
+/* ---------- Placement ---------- */
+document.querySelectorAll('.pitem[data-place]').forEach(item=>{
+  item.addEventListener('click', ()=>{
+    document.querySelectorAll('.pitem').forEach(i=>i.classList.remove('active'));
+    item.classList.add('active');
+    placingType = {kind:'builtin', type:item.dataset.place};
+    svg.classList.add('placing');
+    setStatus('Click on the canvas to place a '+item.textContent.trim());
+  });
+});
+
+function newSymbolAt(x,y,placing){
+  x = snap(x); y = snap(y);
+  if(placing.kind==='builtin'){
+    if(placing.type==='module'){
+      return {id:uid(), type:'module', x,y, name:'MODULE', color:'', bitwidth:1, pins:[]};
+    }
+    if(placing.type==='terminal'){
+      return {id:uid(), type:'terminal', x,y, name:'PORT', color:'', termDir:'in', pins:[], rotation:0};
+    }
+    if(placing.type==='text'){
+      return {id:uid(), type:'text', x,y, name:'label', color:'', pins:[], rotation:0};
+    }
+    const def = builtinDef(placing.type, 1, {});
+    return {id:uid(), type:placing.type, x,y, name:'', color:'', bitwidth:1, lines: def.lines||2, pins:def.pins, rotation:0};
+  } else if(placing.kind==='library'){
+    const lib = state.library.find(l=>l.id===placing.libId);
+    if(!lib) return null;
+    return {id:uid(), type:'module', x,y, name:lib.name, color:lib.color||'',
+      pins: lib.pins.map(p=>({...p, id:uid()}))};
+  }
+}
+
+svg.addEventListener('click', (e)=>{
+  if(dragState || labelDragState || panState) return;
+  const target = e.target;
+
+  // Currently in the middle of routing a wire: this click either adds a
+  // bend (empty canvas) or finishes the wire (landing on a pin).
+  if(wireDraw){
+    if(target.classList.contains('pin-dot')){
+      const symId = target.dataset.symid, pinId = target.dataset.pinid;
+      if(symId===wireDraw.fromSymId && pinId===wireDraw.fromPinId){
+        setStatus('Can\'t connect a pin to itself.');
+        return;
+      }
+      const bendPoints = wireDraw.points.slice(1); // drop the start pin's own position
+      tryConnect({symId:wireDraw.fromSymId, pinId:wireDraw.fromPinId}, {symId, pinId}, bendPoints);
+      wireDraw = null;
+      layerPreview.innerHTML = '';
+      return;
+    }
+    const pt = clientToSvg(e.clientX, e.clientY);
+    const last = wireDraw.points[wireDraw.points.length-1];
+    const c = axisConstrain(last, pt);
+    if(c.x!==last.x || c.y!==last.y) wireDraw.points.push(c);
+    return;
+  }
+
+  if(placingType){
+    const pt = clientToSvg(e.clientX, e.clientY);
+    const sym = newSymbolAt(pt.x, pt.y, placingType);
+    if(sym){ snapshotForUndo(); state.symbols.push(sym); render(); }
+    placingType = null;
+    svg.classList.remove('placing');
+    document.querySelectorAll('.pitem').forEach(i=>i.classList.remove('active'));
+    setStatus('Placed. Select it and click Edit in the toolbar to change it.');
+    return;
+  }
+
+  if(target.classList.contains('pin-dot')){
+    const symId = target.dataset.symid, pinId = target.dataset.pinid;
+    const pos = pinWorldPos(symId, pinId);
+    wireDraw = { fromSymId: symId, fromPinId: pinId, points: [{x:pos.x,y:pos.y}] };
+    setStatus('Click to add a bend, click the target pin to finish (Esc to cancel, Backspace to undo last bend).');
+    return;
+  }
+  if(target.tagName==='path' && target.dataset.wid){
+    selectWire(target.dataset.wid);
+    return;
+  }
+  const g = target.closest('.symbol-g');
+  if(g){
+    selectSymbol(g.dataset.id);
+    return;
+  }
+  clearSelection();
+});
+
+function clientToSvg(cx, cy){
+  // getBoundingClientRect() already accounts for the wrapper's scroll position,
+  // so no extra scroll offset should be added here (that was double-counting it
+  // and drifting further out of sync with the cursor the more you scrolled).
+  const r = svg.getBoundingClientRect();
+  const scaleX = svg.viewBox.baseVal.width ? svg.viewBox.baseVal.width / r.width : 1;
+  const scaleY = svg.viewBox.baseVal.height ? svg.viewBox.baseVal.height / r.height : 1;
+  return { x: (cx - r.left) * scaleX, y: (cy - r.top) * scaleY };
+}
+
+/* ---------- Selection ---------- */
+function selectSymbol(id){ selected = {kind:'symbol', id}; render(); }
+function selectWire(id){ selected = {kind:'wire', id}; render(); }
+function clearSelection(){ selected = null; render(); }
+
+/* ---------- Dragging symbols & pin labels ---------- */
+layerSymbols.addEventListener('mousedown', (e)=>{
+  if(wireDraw) return; // routing a wire; clicks are handled by the click listener
+  if(e.target.classList.contains('pin-name-label')){
+    const symId = e.target.dataset.symid, pinId = e.target.dataset.pinid;
+    const sym = state.symbols.find(s=>s.id===symId);
+    const p = sym && sym.pins.find(pp=>pp.id===pinId);
+    if(p){
+      const pt = clientToSvg(e.clientX, e.clientY);
+      snapshotForUndo();
+      labelDragState = {symId, pinId, startX: pt.x, startY: pt.y, origLox: p.lox||0, origLoy: p.loy||0};
+      e.stopPropagation();
+    }
+    return;
+  }
+  if(e.target.classList.contains('sym-label-drag')){
+    const symId = e.target.dataset.id;
+    const sym = state.symbols.find(s=>s.id===symId);
+    if(sym){
+      const pt = clientToSvg(e.clientX, e.clientY);
+      snapshotForUndo();
+      symLabelDrag = {symId, startX: pt.x, startY: pt.y, origOx: sym.labelOx||0, origOy: sym.labelOy||0};
+      e.stopPropagation();
+    }
+    return;
+  }
+  if(e.target.classList.contains('pin-dot')) return;
+  const g = e.target.closest('.symbol-g');
+  if(!g) return;
+  const sym = state.symbols.find(s=>s.id===g.dataset.id);
+  if(!sym) return;
+  const pt = clientToSvg(e.clientX, e.clientY);
+  snapshotForUndo();
+  dragState = {id:sym.id, offx:pt.x-sym.x, offy:pt.y-sym.y};
+  selected = {kind:'symbol', id:sym.id};
+  e.stopPropagation();
+});
+
+layerWires.addEventListener('mousedown', (e)=>{
+  if(wireDraw) return;
+  if(!e.target.classList.contains('bus-label-drag')) return;
+  const wid = e.target.dataset.wid;
+  const w = state.wires.find(x=>x.id===wid);
+  if(!w) return;
+  const pt = clientToSvg(e.clientX, e.clientY);
+  snapshotForUndo();
+  wireLabelDrag = {wid, startX:pt.x, startY:pt.y, origOx:w.labelOx||0, origOy:w.labelOy||0};
+  e.stopPropagation();
+});
+
+svg.addEventListener('mousemove', (e)=>{
+  const pt = clientToSvg(e.clientX, e.clientY);
+  if(dragState){
+    const sym = state.symbols.find(s=>s.id===dragState.id);
+    if(sym){
+      sym.x = snap(pt.x - dragState.offx);
+      sym.y = snap(pt.y - dragState.offy);
+      render();
+    }
+    return;
+  }
+  if(labelDragState){
+    const sym = state.symbols.find(s=>s.id===labelDragState.symId);
+    const p = sym && sym.pins.find(pp=>pp.id===labelDragState.pinId);
+    if(p){
+      const dxWorld = pt.x - labelDragState.startX;
+      const dyWorld = pt.y - labelDragState.startY;
+      const rad = -((sym.rotation||0)) * Math.PI/180;
+      const dxLocal = dxWorld*Math.cos(rad) - dyWorld*Math.sin(rad);
+      const dyLocal = dxWorld*Math.sin(rad) + dyWorld*Math.cos(rad);
+      p.lox = labelDragState.origLox + dxLocal;
+      p.loy = labelDragState.origLoy + dyLocal;
+      render();
+    }
+    return;
+  }
+  if(symLabelDrag){
+    const sym = state.symbols.find(s=>s.id===symLabelDrag.symId);
+    if(sym){
+      const dxWorld = pt.x - symLabelDrag.startX;
+      const dyWorld = pt.y - symLabelDrag.startY;
+      const rad = -((sym.rotation||0)) * Math.PI/180;
+      const dxLocal = dxWorld*Math.cos(rad) - dyWorld*Math.sin(rad);
+      const dyLocal = dxWorld*Math.sin(rad) + dyWorld*Math.cos(rad);
+      sym.labelOx = symLabelDrag.origOx + dxLocal;
+      sym.labelOy = symLabelDrag.origOy + dyLocal;
+      render();
+    }
+    return;
+  }
+  if(wireLabelDrag){
+    const w = state.wires.find(x=>x.id===wireLabelDrag.wid);
+    if(w){
+      w.labelOx = wireLabelDrag.origOx + (pt.x - wireLabelDrag.startX);
+      w.labelOy = wireLabelDrag.origOy + (pt.y - wireLabelDrag.startY);
+      render();
+    }
+    return;
+  }
+  if(wireDraw){
+    layerPreview.innerHTML='';
+    const pts = wireDraw.points;
+    const last = pts[pts.length-1];
+    const c = axisConstrain(last, pt);
+    let d = 'M'+pts[0].x+','+pts[0].y;
+    for(let i=1;i<pts.length;i++) d += ' L'+pts[i].x+','+pts[i].y;
+    d += ' L'+c.x+','+c.y;
+    layerPreview.appendChild(el('path',{d, class:'drag-preview'}));
+  }
+});
+window.addEventListener('mouseup', ()=>{
+  if(dragState){ dragState=null; render(); }
+  if(labelDragState){ labelDragState=null; render(); }
+  if(symLabelDrag){ symLabelDrag=null; render(); }
+  if(wireLabelDrag){ wireLabelDrag=null; render(); }
+});
+
+window.addEventListener('keydown', (e)=>{
+  if(e.key==='Escape'){
+    wireDraw=null; layerPreview.innerHTML='';
+    labelDragState=null; wireLabelDrag=null; symLabelDrag=null;
+    placingType=null; svg.classList.remove('placing');
+    document.querySelectorAll('.pitem').forEach(i=>i.classList.remove('active'));
+    closeModal();
+  }
+  if(e.key==='Delete' || e.key==='Backspace'){
+    if(document.querySelector('.modal-veil')) return;
+    if(wireDraw){
+      if(wireDraw.points.length>1){ wireDraw.points.pop(); }
+      else { wireDraw=null; layerPreview.innerHTML=''; setStatus('Wire canceled.'); }
+      return;
+    }
+    if(!isTyping(e)) deleteSelected();
+  }
+  if((e.key==='d'||e.key==='D') && !document.querySelector('.modal-veil') && !isTyping(e)){
+    duplicateSelected();
+  }
+  if((e.key==='r'||e.key==='R') && !document.querySelector('.modal-veil') && !isTyping(e)){
+    rotateSelected();
+  }
+  if((e.ctrlKey||e.metaKey) && (e.key==='z'||e.key==='Z') && !document.querySelector('.modal-veil') && !isTyping(e)){
+    e.preventDefault();
+    undo();
+  }
+});
+function rotateSelected(){
+  if(!selected || selected.kind!=='symbol'){ toast('Select a shape first.', true); return; }
+  const sym = state.symbols.find(s=>s.id===selected.id);
+  if(!sym) return;
+  snapshotForUndo();
+  sym.rotation = ((sym.rotation||0)+90)%360;
+  render();
+}
+document.getElementById('btnRotate').onclick = rotateSelected;
+function isTyping(e){
+  const t = e.target;
+  return t && (t.tagName==='INPUT' || t.tagName==='SELECT' || t.tagName==='TEXTAREA');
+}
+
+function tryConnect(a, b, waypoints){
+  if(a.symId===b.symId && a.pinId===b.pinId) return;
+  const pa = pinWorldPos(a.symId, a.pinId), pb = pinWorldPos(b.symId, b.pinId);
+  if(!pa || !pb) return;
+  const symA = state.symbols.find(s=>s.id===a.symId);
+  const symB = state.symbols.find(s=>s.id===b.symId);
+  const aIsPort = symA && symA.type==='terminal';
+  const bIsPort = symB && symB.type==='terminal';
+
+  let from, to;
+  if(aIsPort || bIsPort){
+    // External ports are a wildcard: they can wire into an input or out of
+    // an output without the usual in/out mismatch check.
+    if(aIsPort && bIsPort){ from = a; to = b; }
+    else if(aIsPort){ to = pb.dir==='in' ? b : a; from = pb.dir==='in' ? a : b; }
+    else { to = pa.dir==='in' ? a : b; from = pa.dir==='in' ? b : a; }
+  } else {
+    if(pa.dir === pb.dir){
+      toast('Invalid connection: an '+pa.dir+' pin cannot connect to another '+pb.dir+' pin. Wire needs one input and one output.', true);
+      return;
+    }
+    from = pa.dir==='out' ? a : b;
+    to = pa.dir==='out' ? b : a;
+  }
+  // waypoints were recorded walking from a -> b; reverse them if the wire's
+  // logical direction ended up flipped (from === b) so the routing still lines up.
+  let wps = waypoints ? waypoints.slice() : [];
+  if(from === b) wps = wps.slice().reverse();
+
+  const isBus = pa.bus || pb.bus;
+  const range = pa.bus ? pa.range : pb.range;
+  snapshotForUndo();
+  state.wires.push({id:uid(), from, to, waypoints:wps, bus:isBus, range: range||'', color:''});
+  render();
+  toast('Wire connected.', false);
+}
+
+/* ---------- Delete / duplicate ---------- */
+function deleteSelected(){
+  if(!selected) return;
+  snapshotForUndo();
+  if(selected.kind==='symbol'){
+    state.symbols = state.symbols.filter(s=>s.id!==selected.id);
+    state.wires = state.wires.filter(w=>w.from.symId!==selected.id && w.to.symId!==selected.id);
+  } else {
+    state.wires = state.wires.filter(w=>w.id!==selected.id);
+  }
+  selected=null; render();
+}
+function duplicateSelected(){
+  if(!selected || selected.kind!=='symbol') return;
+  const sym = state.symbols.find(s=>s.id===selected.id);
+  if(!sym) return;
+  snapshotForUndo();
+  const copy = JSON.parse(JSON.stringify(sym));
+  copy.id = uid();
+  copy.x += 30; copy.y += 30;
+  copy.pins.forEach(p=>p.id=uid());
+  state.symbols.push(copy);
+  selected = {kind:'symbol', id:copy.id};
+  render();
+  toast('Duplicated.', false);
+}
+document.getElementById('btnDel').onclick = deleteSelected;
+document.getElementById('btnDup').onclick = duplicateSelected;
+document.getElementById('btnUndo').onclick = undo;
+
+/* ---------- Save to library ---------- */
+document.getElementById('btnSaveLib').onclick = ()=>{
+  if(!selected || selected.kind!=='symbol'){ toast('Select a module first.', true); return; }
+  const sym = state.symbols.find(s=>s.id===selected.id);
+  if(!sym || sym.type!=='module'){ toast('Only modules can be saved to the library.', true); return; }
+  const copy = JSON.parse(JSON.stringify(sym));
+  state.library.push({id:uid(), name:sym.name||'MODULE', color:sym.color, pins: copy.pins.map(p=>{ p.id=uid(); return p; })});
+  renderLibrary();
+  toast('Saved "'+ (sym.name||'MODULE') +'" to library.', false);
+};
+function renderLibrary(){
+  const list = document.getElementById('libList');
+  const title = document.getElementById('libTitle');
+  list.innerHTML='';
+  title.style.display = state.library.length ? 'block' : 'none';
+  state.library.forEach(lib=>{
+    const div = document.createElement('div');
+    div.className='pitem';
+    div.innerHTML = '<span>&#9633; '+escapeHtml(lib.name)+'</span><span class="del" title="Remove">&times;</span>';
+    div.addEventListener('click', (e)=>{
+      if(e.target.classList.contains('del')){
+        state.library = state.library.filter(l=>l.id!==lib.id);
+        renderLibrary();
+        return;
+      }
+      document.querySelectorAll('.pitem').forEach(i=>i.classList.remove('active'));
+      div.classList.add('active');
+      placingType = {kind:'library', libId:lib.id};
+      svg.classList.add('placing');
+      setStatus('Click on the canvas to place "'+lib.name+'".');
+    });
+    list.appendChild(div);
+  });
+}
+function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+/* ---------- Editing via the Edit toolbar button ---------- */
+document.getElementById('btnEdit').onclick = ()=>{
+  if(!selected){ toast('Select a shape or wire first.', true); return; }
+  if(selected.kind==='symbol') openSymbolEditor(selected.id);
+  else openWireEditor(selected.id);
+};
+
+function closeModal(){
+  const v = document.querySelector('.modal-veil');
+  if(v) v.remove();
+}
+function openModal(html){
+  closeModal();
+  const veil = document.createElement('div');
+  veil.className='modal-veil';
+  veil.innerHTML = '<div class="modal">'+html+'</div>';
+  veil.addEventListener('mousedown', (e)=>{ if(e.target===veil) closeModal(); });
+  document.body.appendChild(veil);
+  return veil;
+}
+
+function openSymbolEditor(id){
+  const sym = state.symbols.find(s=>s.id===id);
+  if(!sym) return;
+  if(sym.type==='terminal') return openTerminalEditor(sym);
+  if(sym.type==='text') return openTextEditor(sym);
+  if(sym.type==='module') return openModuleEditor(sym);
+  return openBuiltinEditor(sym);
+}
+
+function openTextEditor(sym){
+  const veil = openModal(`
+    <h3>Text label</h3>
+    <div class="frow"><label>Text</label><input type="text" id="fName" value="${escapeHtml(sym.name||'')}"></div>
+    <div class="frow"><label>Color</label><input type="color" id="fColor" value="${sym.color||'#cfe8ff'}"></div>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mSave">Save</button></div>
+  `);
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mSave').onclick = ()=>{
+    snapshotForUndo();
+    sym.name = veil.querySelector('#fName').value.trim() || 'label';
+    sym.color = veil.querySelector('#fColor').value;
+    closeModal(); render();
+  };
+}
+
+function openTerminalEditor(sym){
+  const curPin = sym.pins && sym.pins[0];
+  const veil = openModal(`
+    <h3>External port</h3>
+    <div class="frow"><label>Name</label><input type="text" id="fName" value="${escapeHtml(sym.name||'')}"></div>
+    <div class="frow"><label>Direction</label>
+      <select id="fDir"><option value="in">Into the design (source)</option><option value="out">Out of the design (sink)</option></select>
+    </div>
+    <div class="frow"><label>Is bus</label><input type="checkbox" id="fBus" ${curPin&&curPin.bus?'checked':''}></div>
+    <div class="frow"><label>Range</label><input type="text" id="fRange" value="${escapeHtml((curPin&&curPin.range)||'')}" placeholder="31:0"></div>
+    <div class="frow"><label>Color</label><input type="color" id="fColor" value="${sym.color||'#cfe8ff'}"></div>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mSave">Save</button></div>
+  `);
+  veil.querySelector('#fDir').value = sym.termDir||'in';
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mSave').onclick = ()=>{
+    snapshotForUndo();
+    sym.name = veil.querySelector('#fName').value.trim() || 'PORT';
+    const newDir = veil.querySelector('#fDir').value;
+    sym.color = veil.querySelector('#fColor').value;
+    const bus = veil.querySelector('#fBus').checked;
+    const range = veil.querySelector('#fRange').value.trim();
+    if(newDir !== sym.termDir){ sym.termDir = newDir; sym.pins = []; }
+    if(!sym.pins.length){ sym.pins = mkPins([{name:newDir==='out'?'OUT':'IN', dir:newDir, side:'right'}]); }
+    sym.pins[0].bus = bus;
+    sym.pins[0].range = range;
+    closeModal(); render();
+  };
+}
+
+function openModuleEditor(sym){
+  const rows = sym.pins.map(p=>pinRowHtml(p)).join('');
+  const veil = openModal(`
+    <h3>Module</h3>
+    <div class="frow"><label>Name</label><input type="text" id="fName" value="${escapeHtml(sym.name||'')}"></div>
+    <div class="frow"><label>Color</label><input type="color" id="fColor" value="${sym.color||'#cfe8ff'}"></div>
+    <div class="frow" style="align-items:flex-start;"><label style="padding-top:6px;">Pins</label>
+      <div style="flex:1;" id="pinRows">${rows}</div>
+    </div>
+    <button class="addpin-btn" id="addPin">+ add pin</button>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mSave">Save</button></div>
+  `);
+  veil.querySelector('#addPin').onclick = ()=>{
+    const div = document.createElement('div');
+    div.innerHTML = pinRowHtml({id:uid(),name:'p',dir:'in',side:'right',bus:false,range:''});
+    veil.querySelector('#pinRows').appendChild(div.firstElementChild);
+  };
+  veil.querySelectorAll('.rm').forEach(bindRemove);
+  function bindRemove(btn){ btn.onclick = ()=>btn.closest('.pinrow').remove(); }
+  veil.querySelector('#pinRows').addEventListener('click', (e)=>{
+    if(e.target.classList.contains('rm')) e.target.closest('.pinrow').remove();
+  });
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mSave').onclick = ()=>{
+    snapshotForUndo();
+    sym.name = veil.querySelector('#fName').value.trim() || 'MODULE';
+    sym.color = veil.querySelector('#fColor').value;
+    const newPins = [];
+    veil.querySelectorAll('.pinrow').forEach(row=>{
+      newPins.push({
+        id: row.dataset.pid || uid(),
+        name: row.querySelector('.pName').value.trim() || 'p',
+        dir: row.querySelector('.pDir').value,
+        side: row.querySelector('.pSide').value,
+        bus: row.querySelector('.pBus').checked,
+        range: row.querySelector('.pRange').value.trim()
+      });
+    });
+    const removedIds = sym.pins.filter(op=>!newPins.find(np=>np.id===op.id)).map(p=>p.id);
+    state.wires = state.wires.filter(w=>{
+      if(w.from.symId===sym.id && removedIds.includes(w.from.pinId)) return false;
+      if(w.to.symId===sym.id && removedIds.includes(w.to.pinId)) return false;
+      return true;
+    });
+    sym.pins = newPins;
+    closeModal(); render();
+  };
+}
+
+function pinRowHtml(p){
+  return `<div class="pinrow" data-pid="${p.id}">
+    <input type="text" class="pName" value="${escapeHtml(p.name)}" placeholder="name">
+    <select class="pDir"><option value="in" ${p.dir==='in'?'selected':''}>in</option><option value="out" ${p.dir==='out'?'selected':''}>out</option></select>
+    <select class="pSide">
+      <option value="left" ${p.side==='left'?'selected':''}>left</option>
+      <option value="top" ${p.side==='top'?'selected':''}>up</option>
+      <option value="bottom" ${p.side==='bottom'?'selected':''}>down</option>
+      <option value="right" ${p.side==='right'?'selected':''}>right</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--ink-dim);"><input type="checkbox" class="pBus" ${p.bus?'checked':''}> bus</label>
+    <input type="text" class="pRange range" value="${escapeHtml(p.range||'')}" placeholder="31:0">
+    <span class="rm">&times;</span>
+  </div>`;
+}
+
+function builtinPinRowHtml(p){
+  return `<div class="pinrow" data-pid="${p.id}">
+    <span style="width:46px;font-size:11px;color:var(--ink);">${escapeHtml(p.name)}</span>
+    <span style="width:26px;font-size:10px;color:var(--ink-dim);">${p.dir}</span>
+    <label style="display:flex;align-items:center;gap:3px;font-size:10.5px;color:var(--ink-dim);"><input type="checkbox" class="pBus" ${p.bus?'checked':''}> bus</label>
+    <input type="text" class="pRange range" value="${escapeHtml(p.range||'')}" placeholder="31:0">
+    <span class="rm" title="Delete this pin">&times;</span>
+  </div>`;
+}
+
+function openBuiltinEditor(sym){
+  const isDecoder = sym.type==='decoder';
+  const veil = openModal(`
+    <h3>${(sym.type||'').toUpperCase()}</h3>
+    <div class="frow"><label>Name</label><input type="text" id="fName" value="${escapeHtml(sym.name||'')}" placeholder="${BUILTIN_LABELS[sym.type]||sym.type}"></div>
+    <div class="frow"><label>Bit width</label><input type="number" id="fBW" min="1" max="256" value="${sym.bitwidth||1}"></div>
+    ${isDecoder?`<div class="frow"><label>Input lines</label><select id="fLines"><option value="1" ${sym.lines===1?'selected':''}>1</option><option value="2" ${sym.lines===2?'selected':''}>2</option><option value="3" ${sym.lines===3?'selected':''}>3</option><option value="4" ${sym.lines===4?'selected':''}>4</option></select></div>`:''}
+    <div class="frow"><label>Color</label><input type="color" id="fColor" value="${sym.color||'#cfe8ff'}"></div>
+    <div class="frow" style="align-items:flex-start;"><label style="padding-top:6px;">Pins</label>
+      <div style="flex:1;" id="pinRows">${sym.pins.map(builtinPinRowHtml).join('')}</div>
+    </div>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mSave">Save</button></div>
+  `);
+  veil.querySelector('#pinRows').addEventListener('click', (e)=>{
+    if(e.target.classList.contains('rm')) e.target.closest('.pinrow').remove();
+  });
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mSave').onclick = ()=>{
+    snapshotForUndo();
+    sym.name = veil.querySelector('#fName').value.trim();
+    sym.bitwidth = Math.max(1, parseInt(veil.querySelector('#fBW').value)||1);
+    sym.color = veil.querySelector('#fColor').value;
+
+    const newPins = [];
+    veil.querySelectorAll('.pinrow').forEach(row=>{
+      const orig = sym.pins.find(p=>p.id===row.dataset.pid);
+      if(!orig) return;
+      newPins.push({...orig, bus: row.querySelector('.pBus').checked, range: row.querySelector('.pRange').value.trim()});
+    });
+    const removedIds = sym.pins.filter(op=>!newPins.find(np=>np.id===op.id)).map(p=>p.id);
+    state.wires = state.wires.filter(w=>{
+      if(w.from.symId===sym.id && removedIds.includes(w.from.pinId)) return false;
+      if(w.to.symId===sym.id && removedIds.includes(w.to.pinId)) return false;
+      return true;
+    });
+    sym.pins = newPins;
+
+    if(isDecoder){
+      const lines = parseInt(veil.querySelector('#fLines').value)||2;
+      if(lines !== sym.lines){
+        sym.lines = lines;
+        const oldOutIds = sym.pins.filter(p=>p.dir==='out').map(p=>p.id);
+        state.wires = state.wires.filter(w=>{
+          if(w.from.symId===sym.id && oldOutIds.includes(w.from.pinId)) return false;
+          if(w.to.symId===sym.id && oldOutIds.includes(w.to.pinId)) return false;
+          return true;
+        });
+        const inPins = sym.pins.filter(p=>p.dir==='in');
+        const def = builtinDef('decoder', 1, {lines});
+        sym.pins = [...inPins, ...def.pins.filter(p=>p.dir==='out')];
+      }
+    }
+    closeModal(); render();
+  };
+}
+
+function openWireEditor(wid){
+  const w = state.wires.find(x=>x.id===wid);
+  if(!w) return;
+  const veil = openModal(`
+    <h3>Wire</h3>
+    <div class="frow"><label>Is bus</label><input type="checkbox" id="fBus" ${w.bus?'checked':''}></div>
+    <div class="frow"><label>Range</label><input type="text" id="fRange" value="${escapeHtml(w.range||'')}" placeholder="31:0"></div>
+    <div class="frow"><label>Color</label><input type="color" id="fColor" value="${w.color||'#5fd0ff'}"></div>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mSave">Save</button></div>
+  `);
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mSave').onclick = ()=>{
+    snapshotForUndo();
+    w.bus = veil.querySelector('#fBus').checked;
+    w.range = veil.querySelector('#fRange').value.trim();
+    w.color = veil.querySelector('#fColor').value;
+    closeModal(); render();
+  };
+}
+
+/* ---------- Save / Load ---------- */
+function triggerDownload(data, filename, mime){
+  try{
+    const blob = (data instanceof Blob) ? data : new Blob([data], {type:mime});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    return true;
+  }catch(err){ return false; }
+}
+function showPdfFallback(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const veil = openModal(`
+    <h3>Export PDF</h3>
+    <p style="font-size:12px;color:var(--ink-dim);margin:0 0 10px;line-height:1.5;">
+      A download of <b>${escapeHtml(filename)}</b> was just triggered — check your Downloads folder.
+      If nothing appeared (some browsers or preview windows block automatic downloads), open it in a
+      new tab instead — your browser's PDF viewer will have its own Save/Download button — or try the
+      download again.
+    </p>
+    <div class="modal-actions">
+      <a id="mOpenTab" href="${url}" target="_blank" rel="noopener" class="mbtn" style="text-decoration:none;">Open in new tab</a>
+      <button class="mbtn" id="mAgain">Download again</button>
+      <button class="mbtn primary" id="mDone">Done</button>
+    </div>
+  `);
+  veil.querySelector('#mDone').onclick = closeModal;
+  veil.querySelector('#mAgain').onclick = ()=>{
+    if(!triggerDownload(blob, filename, 'application/pdf')) toast('Download blocked — try "Open in new tab" instead.', true);
+  };
+}
+function showSaveFallback(text, filename){
+  const veil = openModal(`
+    <h3>Save ${escapeHtml(filename)}</h3>
+    <p style="font-size:12px;color:var(--ink-dim);margin:0 0 10px;line-height:1.5;">
+      A browser download of <b>${escapeHtml(filename)}</b> was just triggered — check your Downloads folder.
+      If nothing appeared (some browsers or preview windows block automatic downloads), copy the text
+      below and save it yourself as a <code>.json</code> file, or try the download again.
+    </p>
+    <textarea id="fSaveText" readonly style="width:100%;height:220px;background:var(--fill);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);font-size:11px;border-radius:4px;padding:8px;resize:vertical;">${escapeHtml(text)}</textarea>
+    <div class="modal-actions">
+      <button class="mbtn" id="mCopy">Copy to clipboard</button>
+      <button class="mbtn" id="mAgain">Download again</button>
+      <button class="mbtn primary" id="mDone">Done</button>
+    </div>
+  `);
+  veil.querySelector('#mDone').onclick = closeModal;
+  veil.querySelector('#mCopy').onclick = async ()=>{
+    try{
+      await navigator.clipboard.writeText(text);
+      toast('Copied to clipboard.', false);
+    }catch(err){
+      veil.querySelector('#fSaveText').select();
+      toast('Couldn\'t reach the clipboard — text is selected, press Ctrl/Cmd+C.', true);
+    }
+  };
+  veil.querySelector('#mAgain').onclick = ()=>{
+    if(!triggerDownload(text, filename, 'application/json')) toast('Download blocked — use Copy to clipboard instead.', true);
+  };
+}
+document.getElementById('btnSave').onclick = ()=>{
+  const data = JSON.stringify({symbols:state.symbols, wires:state.wires, library:state.library}, null, 2);
+  triggerDownload(data, 'architecture.arch.json', 'application/json');
+  showSaveFallback(data, 'architecture.arch.json');
+};
+document.getElementById('btnLoad').onclick = ()=>document.getElementById('fileInput').click();
+document.getElementById('fileInput').onchange = (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(reader.result);
+      snapshotForUndo();
+      state.symbols = data.symbols||[];
+      state.wires = data.wires||[];
+      state.library = data.library||[];
+      selected = null;
+      render(); renderLibrary();
+      toast('Loaded '+file.name, false);
+    }catch(err){ toast('Could not read that file: '+err.message, true); }
+  };
+  reader.readAsText(file);
+  e.target.value='';
+};
+
+/* ---------- PDF export (white background, self-contained styling) ---------- */
+const PDF_EXPORT_STYLES = {
+  color: `
+    text{font-family:Consolas,'SF Mono',Menlo,monospace;}
+    .sym-body{fill:#f4f7fb;stroke:#16324a;stroke-width:1.6;}
+    .sym-label{fill:#16324a;font-size:12px;text-anchor:middle;dominant-baseline:middle;}
+    .pin-label{fill:#4c657f;font-size:10px;}
+    .pin-dot{fill:#ffffff;stroke:#0f6fb0;stroke-width:1.6;}
+    .pin-dot.bus{stroke:#b8650a;}
+    .wire-path{fill:none;stroke:#0f6fb0;stroke-width:1.8;}
+    .wire-path.bus{fill:none;stroke:#b8650a;stroke-width:4;}
+    .bus-label{fill:#b8650a;font-size:10.5px;text-anchor:middle;}
+    .term-shape{fill:#f4f7fb;stroke:#16324a;stroke-width:1.6;}
+    .term-stub{stroke:#16324a;}
+    #arrow path{fill:#0f6fb0;}
+    #arrowBus path{fill:#b8650a;}
+  `,
+  bw: `
+    text{font-family:Consolas,'SF Mono',Menlo,monospace;}
+    .sym-body{fill:#ffffff;stroke:#000000;stroke-width:1.8;}
+    .sym-label{fill:#000000;font-size:12px;text-anchor:middle;dominant-baseline:middle;}
+    .pin-label{fill:#000000;font-size:10px;}
+    .pin-dot{fill:#ffffff;stroke:#000000;stroke-width:1.8;}
+    .pin-dot.bus{stroke:#000000;stroke-width:2.4;}
+    .wire-path{fill:none;stroke:#000000;stroke-width:1.8;}
+    .wire-path.bus{fill:none;stroke:#000000;stroke-width:4.4;}
+    .bus-label{fill:#000000;font-size:10.5px;text-anchor:middle;font-weight:bold;}
+    .term-shape{fill:#ffffff;stroke:#000000;stroke-width:1.8;}
+    .term-stub{stroke:#000000;}
+    #arrow path{fill:#000000;}
+    #arrowBus path{fill:#000000;}
+  `
+};
+
+function openPdfExportOptions(){
+  const veil = openModal(`
+    <h3>Export PDF</h3>
+    <div class="frow"><label>Style</label>
+      <select id="fStyle">
+        <option value="color">Color (tuned for white background)</option>
+        <option value="bw">Black &amp; white (print-friendly)</option>
+      </select>
+    </div>
+    <div class="modal-actions"><button class="mbtn" id="mCancel">Cancel</button><button class="mbtn primary" id="mGo">Export</button></div>
+  `);
+  veil.querySelector('#mCancel').onclick = closeModal;
+  veil.querySelector('#mGo').onclick = ()=>{
+    const style = veil.querySelector('#fStyle').value;
+    closeModal();
+    runPdfExport(style);
+  };
+}
+document.getElementById('btnPdf').onclick = openPdfExportOptions;
+
+function runPdfExport(style){
+  if(!state.symbols.length){ toast('Nothing to export yet.', true); return; }
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  state.symbols.forEach(s=>{
+    minX=Math.min(minX,s.x-10); minY=Math.min(minY,s.y-10);
+    maxX=Math.max(maxX,s.x+(s._w||60)+10); maxY=Math.max(maxY,s.y+(s._h||40)+25);
+  });
+  state.wires.forEach(w=>{
+    (w.waypoints||[]).forEach(pt=>{
+      minX=Math.min(minX,pt.x-10); minY=Math.min(minY,pt.y-10);
+      maxX=Math.max(maxX,pt.x+10); maxY=Math.max(maxY,pt.y+10);
+    });
+  });
+  const w = Math.max(400, maxX-minX+40), h = Math.max(300, maxY-minY+40);
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('width', w); clone.setAttribute('height', h);
+  clone.setAttribute('viewBox', `${minX-20} ${minY-20} ${w} ${h}`);
+
+  // Selection highlighting shouldn't appear in the export.
+  clone.querySelectorAll('.selected').forEach(n=>n.classList.remove('selected'));
+  clone.querySelectorAll('.wire-hit').forEach(n=>n.remove());
+
+  // Black & white mode: any custom colors the person picked were applied as
+  // inline style (so they'd beat the on-screen CSS classes), which means they'd
+  // also beat our export stylesheet below. Strip them here so everything falls
+  // back to the flat black-on-white palette.
+  if(style==='bw'){
+    clone.querySelectorAll('[style]').forEach(n=>{
+      if(n.style){ n.style.removeProperty('stroke'); n.style.removeProperty('fill'); }
+    });
+  }
+
+  const styleEl = document.createElementNS(NS,'style');
+  styleEl.textContent = PDF_EXPORT_STYLES[style] || PDF_EXPORT_STYLES.color;
+  clone.insertBefore(styleEl, clone.firstChild);
+  const bgRect = el('rect',{x:minX-20,y:minY-20,width:w,height:h,fill:'#ffffff'});
+  clone.insertBefore(bgRect, styleEl.nextSibling);
+
+  const xml = new XMLSerializer().serializeToString(clone);
+
+  function fallbackToSvg(reason){
+    const ok = triggerDownload(xml, 'architecture.svg', 'image/svg+xml');
+    if(ok){
+      toast(reason+' — downloaded architecture.svg instead. Open it in a browser and use Print \u2192 Save as PDF, or open it in any vector editor.', true);
+    } else {
+      toast(reason+', and the SVG fallback download also failed. Try a different browser, or use Save file and re-open the diagram there.', true);
+    }
+  }
+
+  // Some sandboxed preview environments block blob: URLs for <img> (the same
+  // kind of restriction that can silently block file downloads), so a data:
+  // URI is used here instead — it's accepted far more widely.
+  let dataUri;
+  try{
+    dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+  }catch(err){ fallbackToSvg('Could not prepare the diagram for PDF export'); return; }
+
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    fallbackToSvg('The PDF library didn\'t load (likely blocked in this environment)');
+    return;
+  }
+
+  const img = new Image();
+  img.onload = ()=>{
+    try{
+      const scale = 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = w*scale; canvas.height = h*scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0,0, w*scale, h*scale);
+      const imgData = canvas.toDataURL('image/png');
+      const orientation = w>h ? 'l':'p';
+      const pdf = new window.jspdf.jsPDF({orientation, unit:'pt', format:[w,h]});
+      pdf.addImage(imgData, 'PNG', 0, 0, w, h);
+      // Not using pdf.save() here — it uses its own internal download trigger,
+      // which hits the same silent-block issue some preview windows have with
+      // blob downloads. Routing the raw PDF bytes through our own triggerDownload
+      // (and always offering the fallback dialog) is more reliable.
+      const pdfBlob = pdf.output('blob');
+      triggerDownload(pdfBlob, 'architecture.pdf', 'application/pdf');
+      showPdfFallback(pdfBlob, 'architecture.pdf');
+    }catch(err){
+      fallbackToSvg('PDF export failed while rasterizing the diagram');
+    }
+  };
+  img.onerror = ()=>{ fallbackToSvg('PDF export failed while rendering the canvas'); };
+  img.src = dataUri;
+};
+
+render();
+renderLibrary();
+})();
+</script>
+</body>
+</html>
